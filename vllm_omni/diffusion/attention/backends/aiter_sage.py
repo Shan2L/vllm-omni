@@ -45,7 +45,9 @@ def _gcn_arch() -> str:
 
 
 def _sage_kernel():
-    # Registered by aiter with a fake implementation, so it is opaque to torch.compile.
+    # Importing aiter registers the op, with a fake implementation, so it is opaque to torch.compile.
+    import aiter  # noqa: F401
+
     return torch.ops.aiter.gfx1201_sage_attention
 
 
@@ -63,19 +65,20 @@ class AiterSageAttentionBackend(AttentionBackend):
 
     @classmethod
     def validate_available(cls) -> None:
+        name = cls.get_name()
         arch = _gcn_arch()
         if arch not in _SUPPORTED_ARCHS:
             raise ValueError(
-                f"{_NAME} has kernels for {', '.join(_SUPPORTED_ARCHS)} only, but this GPU is {arch}. "
+                f"{name} has kernels for {', '.join(_SUPPORTED_ARCHS)} only, but this GPU is {arch}. "
                 "Select TORCH_SDPA or FLASH_ATTN instead."
             )
         try:
             import aiter
         except ImportError as exc:
-            raise ValueError(f"{_NAME} requires aiter; install ROCm/aiter or select TORCH_SDPA.") from exc
+            raise ValueError(f"{name} requires aiter; install ROCm/aiter or select TORCH_SDPA.") from exc
         if not hasattr(aiter, "gfx1201_sage_attention"):
             raise ValueError(
-                f"{_NAME} requires an aiter build with gfx1201_sage_attention; update aiter or select TORCH_SDPA."
+                f"{name} requires an aiter build with gfx1201_sage_attention; update aiter or select TORCH_SDPA."
             )
 
     @classmethod
@@ -97,6 +100,8 @@ class AiterSageAttentionBackend(AttentionBackend):
 
 
 class AiterSageAttentionImpl(AttentionImpl):
+    _backend_name = _NAME
+
     def __init__(
         self,
         num_heads: int,
@@ -167,14 +172,14 @@ class AiterSageAttentionImpl(AttentionImpl):
             mask_mode=MaskMode.NONE,
             packing_mode=PackingMode.NONE,
         )
-        result = ExecutionPathResult.unmigrated(_NAME, context, path="sage_dense")
+        result = ExecutionPathResult.unmigrated(self._backend_name, context, path="sage_dense")
         if context.platform != "rocm":
-            return replace(result, support=CapabilityResult.unsupported(f"{_NAME} runs on ROCm only."))
+            return replace(result, support=CapabilityResult.unsupported(f"{self._backend_name} runs on ROCm only."))
         reason = self._unsupported_reason(query, key, value, attn_metadata)
         if reason:
             return replace(
                 result,
-                support=CapabilityResult.unsupported(f"{_NAME}: {reason} Select another backend."),
+                support=CapabilityResult.unsupported(f"{self._backend_name}: {reason} Select another backend."),
             )
         if (
             context.piecewise
@@ -186,7 +191,8 @@ class AiterSageAttentionImpl(AttentionImpl):
             return replace(
                 result,
                 support=CapabilityResult.unmigrated(
-                    "Only dense single-device AITER_SAGE without paged KV, parallel, or outer boundaries is verified."
+                    f"Only dense single-device {self._backend_name} without paged KV, parallel, "
+                    "or outer boundaries is verified."
                 ),
             )
         return replace(result, support=CapabilityResult.supported(), compilation_mode=CompilationMode.CUSTOM_OP)
@@ -200,7 +206,7 @@ class AiterSageAttentionImpl(AttentionImpl):
     ) -> torch.Tensor:
         reason = self._unsupported_reason(query, key, value, attn_metadata)
         if reason:
-            raise ValueError(f"{_NAME}: {reason}")
+            raise ValueError(f"{self._backend_name}: {reason}")
         kernel = _sage_kernel()
         valid = _valid_kv_length(attn_metadata)
         if valid is None or valid == key.shape[1]:
@@ -223,4 +229,4 @@ class AiterSageAttentionImpl(AttentionImpl):
         value: torch.Tensor,
         attn_metadata: AttentionMetadata | None = None,
     ) -> torch.Tensor:
-        raise NotImplementedError(f"{_NAME} runs on ROCm only.")
+        raise NotImplementedError(f"{self._backend_name} runs on ROCm only.")
