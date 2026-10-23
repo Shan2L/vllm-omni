@@ -59,7 +59,7 @@ def is_minimax_h3_modular(model: str, revision: str | None = None) -> bool:
         # class and even ship ``modular_model_index.json`` while retaining the
         # legacy FL2VA / Ref2VA layout, so the partitions take precedence over
         # the marker files that FastH3 modular releases carry.
-        if any((path / partition).is_dir() for partition in _NATIVE_PARTITIONS):
+        if any((path / partition / "model_index.json").is_file() for partition in _NATIVE_PARTITIONS):
             return False
         return (path / "modular_model_index.json").is_file() or (path / "fastvideo_inference.json").is_file()
     # The FastVideo release is the modular checkpoint handled by this
